@@ -2,6 +2,8 @@
 
 Firmware de controle e telemetria desenvolvido pela equipe de Eletrônica e Sistemas Embarcados (ESE) para estabilização do drone de bancada em 1-DOF e 2-DOF, utilizando ESP32-S3.
 
+Relatório completo do projeto (ABNT): [docs/RelatorioDroneBancada.pdf](docs/RelatorioDroneBancada.pdf)
+
 ---
 
 ## Hardware
