@@ -15,11 +15,9 @@ Firmware de controle e telemetria desenvolvido pela equipe de Eletrônica e Sist
 
 ---
 
-## Arquitetura de Firmware
+## Arquitetura do Firmware
 
 O sistema usa FreeRTOS em dual-core para isolar o controle crítico da telemetria:
-
-## Arquitetura do Firmware
 
 ```mermaid
 flowchart LR
@@ -99,10 +97,7 @@ Na inicialização, os offsets e posições salvas são automaticamente aplicado
 
 O ESP32 sobe como **Access Point Wi-Fi**. Conecte-se à rede configurada e acesse `192.168.4.1` no browser.
 
-| Página | Rota | Função |
-|---|---|---|
-| Config PID | `/` | Ajuste dos ganhos e modo de controle em runtime |
-| Teste de Motor | `/test` | Controle manual de duty cycle com telemetria em tempo real |
+Página única (`/`) com abas: **Telemetria** (gráficos ao vivo), **Controle** (modo de operação e ganhos, com escala manual/hold nos gráficos), **Calibração** (IMU, motores, encoders), **Teste** (duty cycle manual) e **Rotina** (testes em malha aberta).
 
 ---
 
