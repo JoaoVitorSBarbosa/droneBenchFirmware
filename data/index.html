@@ -92,7 +92,23 @@
                 padding:14px 14px 10px;margin-bottom:14px}
     .chart-title{color:#67e8f9;font-size:.68rem;font-weight:600;text-transform:uppercase;
                  letter-spacing:.12em;margin-bottom:10px}
+    .chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    .chart-header .chart-title{margin-bottom:0}
     canvas{display:block;border-radius:4px;width:100%}
+
+    /* chart scale controls */
+    .scale-btn{background:transparent;border:1px solid #334155;color:#64748b;font-size:.6rem;
+               font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;
+               border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap}
+    .scale-btn:hover{border-color:#4a6a7a;color:#94a3b8}
+    .scale-btn.active{border-color:#06b6d4;color:#06b6d4;background:rgba(6,182,212,.08)}
+    .scale-btn.holding{border-color:#fb923c;color:#fb923c;background:rgba(251,146,60,.1)}
+    .scale-panel{display:none;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;
+                 padding:10px;margin-bottom:10px}
+    .scale-panel.open{display:block}
+    .scale-panel .field-group{margin-bottom:8px}
+    .scale-panel .field-group:last-child{margin-bottom:8px}
+    .scale-panel .btn{padding:9px;font-size:.7rem}
 
     /* telemetry values */
     .tele-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
@@ -365,12 +381,46 @@
   </div>
 
   <div class="chart-card">
-    <div class="chart-title">Pitch — Enc vs Setpoint (°)</div>
-    <canvas id="c-ctrl-pitch" height="130"></canvas>
+    <div class="chart-header">
+      <span class="chart-title">Pitch — Enc vs Setpoint (°)</span>
+      <div style="display:flex;gap:6px">
+        <button class="scale-btn" id="hold-btn-ctrlPitch" onclick="toggleHold('ctrlPitch')">⏸ Segurar</button>
+        <button class="scale-btn" id="scale-btn-ctrlPitch" onclick="toggleScalePanel('ctrlPitch')">Escala Manual</button>
+      </div>
+    </div>
+    <div class="scale-panel" id="scale-panel-ctrlPitch">
+      <div class="field-group cols2">
+        <div class="field"><label>X min<span>s</span></label><input type="number" id="ctrlPitch-xmin" step="any"></div>
+        <div class="field"><label>X max<span>s</span></label><input type="number" id="ctrlPitch-xmax" step="any"></div>
+      </div>
+      <div class="field-group cols2">
+        <div class="field"><label>Y min<span>°</span></label><input type="number" id="ctrlPitch-ymin" step="any"></div>
+        <div class="field"><label>Y max<span>°</span></label><input type="number" id="ctrlPitch-ymax" step="any"></div>
+      </div>
+      <button class="btn btn-primary" onclick="applyScale('ctrlPitch')">Aplicar</button>
+    </div>
+    <canvas id="c-ctrl-pitch" height="150"></canvas>
   </div>
   <div class="chart-card">
-    <div class="chart-title">Yaw — Enc vs Setpoint (°)</div>
-    <canvas id="c-ctrl-yaw" height="130"></canvas>
+    <div class="chart-header">
+      <span class="chart-title">Yaw — Enc vs Setpoint (°)</span>
+      <div style="display:flex;gap:6px">
+        <button class="scale-btn" id="hold-btn-ctrlYaw" onclick="toggleHold('ctrlYaw')">⏸ Segurar</button>
+        <button class="scale-btn" id="scale-btn-ctrlYaw" onclick="toggleScalePanel('ctrlYaw')">Escala Manual</button>
+      </div>
+    </div>
+    <div class="scale-panel" id="scale-panel-ctrlYaw">
+      <div class="field-group cols2">
+        <div class="field"><label>X min<span>s</span></label><input type="number" id="ctrlYaw-xmin" step="any"></div>
+        <div class="field"><label>X max<span>s</span></label><input type="number" id="ctrlYaw-xmax" step="any"></div>
+      </div>
+      <div class="field-group cols2">
+        <div class="field"><label>Y min<span>°</span></label><input type="number" id="ctrlYaw-ymin" step="any"></div>
+        <div class="field"><label>Y max<span>°</span></label><input type="number" id="ctrlYaw-ymax" step="any"></div>
+      </div>
+      <button class="btn btn-primary" onclick="applyScale('ctrlYaw')">Aplicar</button>
+    </div>
+    <canvas id="c-ctrl-yaw" height="150"></canvas>
   </div>
 </section>
 
@@ -685,14 +735,42 @@ class RChart {
     this.cv=c; this.ctx=c.getContext('2d');
     this.n=opts.n||200; this.yMin=opts.yMin; this.yMax=opts.yMax;
     this.auto=opts.auto||false;
+    // Time-axis mode: x is real elapsed seconds instead of a sample index,
+    // and supports a manual (frozen) scale set by the user via setManualScale().
+    this.timeAxis=opts.timeAxis||false;
+    this.autoWindowSec=opts.autoWindowSec||6;
+    this.bufferSec=opts.bufferSec||300;
+    this.manual=false;
+    this.held=false;
+    this.t0=performance.now()/1000;
     this.series=opts.series.map(s=>({...s,data:[]}));
     this._raf=null; this._draw();
   }
   push(vals) {
-    this.series.forEach((s,i)=>{s.data.push(vals[i]??null);if(s.data.length>this.n)s.data.shift();});
-    if(!this._raf)this._raf=requestAnimationFrame(()=>{this._raf=null;this._draw();});
+    if(this.timeAxis){
+      const t=performance.now()/1000-this.t0, cutoff=t-this.bufferSec;
+      this.series.forEach((s,i)=>{
+        if(vals[i]!=null) s.data.push({t,v:vals[i]});
+        while(s.data.length&&s.data[0].t<cutoff) s.data.shift();
+      });
+    } else {
+      this.series.forEach((s,i)=>{s.data.push(vals[i]??null);if(s.data.length>this.n)s.data.shift();});
+    }
+    // Data keeps buffering even while held — only the redraw is paused,
+    // so unholding (or switching to manual scale) can still see what came in.
+    if(!this.held&&!this._raf)this._raf=requestAnimationFrame(()=>{this._raf=null;this._draw();});
   }
-  _draw() {
+  setManualScale(xMin,xMax,yMin,yMax){
+    this.manual=true; this.manX=[xMin,xMax]; this.manY=[yMin,yMax];
+    this._draw();
+  }
+  setAuto(){ this.manual=false; this._draw(); }
+  setHold(v){
+    this.held=v;
+    if(!v&&!this._raf)this._raf=requestAnimationFrame(()=>{this._raf=null;this._draw();});
+  }
+  _draw() { return this.timeAxis ? this._drawTime() : this._drawIndex(); }
+  _drawIndex() {
     const{ctx,cv,series,n}=this,W=cv.width,H=cv.height,PL=38,PR=6,PT=6,PB=22;
     const cW=W-PL-PR,cH=H-PT-PB;
     let yMin=this.yMin,yMax=this.yMax;
@@ -704,6 +782,37 @@ class RChart {
     series.forEach(s=>{ctx.strokeStyle=s.color;ctx.lineWidth=s.width||1.5;ctx.setLineDash(s.dash||[]);ctx.beginPath();let f=true;s.data.forEach((v,i)=>{if(v===null){f=true;return;}const x=sx(i),y=sy(v);f?ctx.moveTo(x,y):ctx.lineTo(x,y);f=false;});ctx.stroke();ctx.setLineDash([]);});
     let lx=PL;ctx.font='10px sans-serif';series.forEach(s=>{ctx.fillStyle=s.color;ctx.fillRect(lx,H-14,14,3);ctx.fillStyle='#94a3b8';ctx.textAlign='left';ctx.fillText(s.label,lx+17,H-8);lx+=ctx.measureText(s.label).width+34;});
   }
+  _drawTime() {
+    const{ctx,cv,series}=this,W=cv.width,H=cv.height,PL=40,PR=6,PT=6,PB=32;
+    const cW=W-PL-PR,cH=H-PT-PB;
+    const nowT=performance.now()/1000-this.t0;
+    let xMin,xMax;
+    if(this.manual){[xMin,xMax]=this.manX;} else {xMax=nowT;xMin=Math.max(0,nowT-this.autoWindowSec);}
+    if(xMax<=xMin)xMax=xMin+1;
+    let yMin,yMax;
+    if(this.manual){[yMin,yMax]=this.manY;} else {
+      const a=series.flatMap(s=>s.data.filter(p=>p.t>=xMin&&p.t<=xMax).map(p=>p.v));
+      if(a.length){yMin=Math.min(...a);yMax=Math.max(...a);const p=(yMax-yMin)*.12||1;yMin-=p;yMax+=p;}else{yMin=-1;yMax=1;}
+    }
+    if(yMax<=yMin)yMax=yMin+1;
+    this.lastX=[xMin,xMax]; this.lastY=[yMin,yMax];
+    const sy=v=>PT+cH-((v-yMin)/(yMax-yMin))*cH, sx=t=>PL+((t-xMin)/(xMax-xMin))*cW;
+    ctx.fillStyle='#0f172a';ctx.fillRect(0,0,W,H);
+    for(let i=0;i<=4;i++){const y=PT+(i/4)*cH,val=yMax-(i/4)*(yMax-yMin);ctx.strokeStyle='#1e3a5f';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(PL+cW,y);ctx.stroke();ctx.fillStyle='#475569';ctx.font='9px monospace';ctx.textAlign='right';ctx.fillText(val.toFixed(1),PL-3,y+3.5);}
+    for(let i=0;i<=4;i++){const x=PL+(i/4)*cW,val=xMin+(i/4)*(xMax-xMin);ctx.strokeStyle='#1e3a5f';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,PT);ctx.lineTo(x,PT+cH);ctx.stroke();ctx.fillStyle='#475569';ctx.font='9px monospace';ctx.textAlign='center';ctx.fillText(val.toFixed(1)+'s',x,PT+cH+12);}
+    if(yMin<0&&yMax>0){const zy=sy(0);ctx.strokeStyle='#334155';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(PL,zy);ctx.lineTo(PL+cW,zy);ctx.stroke();ctx.setLineDash([]);}
+    series.forEach(s=>{
+      ctx.strokeStyle=s.color;ctx.lineWidth=s.width||1.5;ctx.setLineDash(s.dash||[]);ctx.beginPath();
+      let f=true;
+      s.data.forEach(p=>{
+        if(p.t<xMin||p.t>xMax){f=true;return;}
+        const x=sx(p.t),y=sy(p.v);
+        f?ctx.moveTo(x,y):ctx.lineTo(x,y);f=false;
+      });
+      ctx.stroke();ctx.setLineDash([]);
+    });
+    let lx=PL;ctx.font='10px sans-serif';series.forEach(s=>{ctx.fillStyle=s.color;ctx.fillRect(lx,H-14,14,3);ctx.fillStyle='#94a3b8';ctx.textAlign='left';ctx.fillText(s.label,lx+17,H-8);lx+=ctx.measureText(s.label).width+34;});
+  }
 }
 const cAngles=new RChart('c-angles',{n:200,yMin:-180,yMax:180,series:[{label:'Pitch',color:'#06b6d4'},{label:'Yaw',color:'#fb923c'}]});
 const cEnc   =new RChart('c-enc',   {n:200,auto:true,series:[{label:'Enc Pitch',color:'#4ade80'},{label:'Enc Yaw',color:'#f87171'}]});
@@ -711,14 +820,53 @@ const cU     =new RChart('c-u',     {n:200,yMin:-255,yMax:255,series:[{label:'uP
 const cAccel  =new RChart('c-accel',    {n:200,h:110,yMin:-2.2,yMax:2.2,series:[{label:'ax',color:'#f87171'},{label:'ay',color:'#4ade80'},{label:'az',color:'#60a5fa'}]});
 const cVelPitch=new RChart('c-vel-pitch',{n:200,auto:true,series:[{label:'ω Pitch (°/s)',color:'#06b6d4'}]});
 const cVelYaw  =new RChart('c-vel-yaw',  {n:200,auto:true,series:[{label:'ω Yaw (°/s)', color:'#fb923c'}]});
-const cCtrlPitch=new RChart('c-ctrl-pitch',{n:300,auto:true,series:[
+const cCtrlPitch=new RChart('c-ctrl-pitch',{h:150,timeAxis:true,autoWindowSec:6,bufferSec:300,series:[
   {label:'Enc Pitch', color:'#06b6d4'},
   {label:'Setpoint',  color:'#fb923c', dash:[6,3], width:1.2}
 ]});
-const cCtrlYaw=new RChart('c-ctrl-yaw',{n:300,auto:true,series:[
+const cCtrlYaw=new RChart('c-ctrl-yaw',{h:150,timeAxis:true,autoWindowSec:6,bufferSec:300,series:[
   {label:'Enc Yaw',  color:'#4ade80'},
   {label:'Setpoint', color:'#fb923c', dash:[6,3], width:1.2}
 ]});
+
+// ── Escala manual dos gráficos de controle (X em segundos, Y em graus) ────────
+const scaleCharts={ctrlPitch:cCtrlPitch, ctrlYaw:cCtrlYaw};
+
+function toggleScalePanel(key){
+  const chart=scaleCharts[key];
+  const btn=document.getElementById('scale-btn-'+key);
+  const panel=document.getElementById('scale-panel-'+key);
+  if(chart.manual){
+    chart.setAuto();
+    btn.classList.remove('active'); btn.textContent='Escala Manual';
+    panel.classList.remove('open');
+    return;
+  }
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el&&!el.value) el.value=v.toFixed(1); };
+  const[xMin,xMax]=chart.lastX||[0,chart.autoWindowSec];
+  const[yMin,yMax]=chart.lastY||[-10,10];
+  set(key+'-xmin',xMin); set(key+'-xmax',xMax);
+  set(key+'-ymin',yMin); set(key+'-ymax',yMax);
+  panel.classList.add('open');
+  applyScale(key);
+  btn.classList.add('active'); btn.textContent='Escala Automática';
+}
+
+function applyScale(key){
+  const chart=scaleCharts[key];
+  const g=id=>parseFloat(document.getElementById(id).value);
+  const xMin=g(key+'-xmin'), xMax=g(key+'-xmax'), yMin=g(key+'-ymin'), yMax=g(key+'-ymax');
+  if([xMin,xMax,yMin,yMax].some(Number.isNaN)||xMax<=xMin||yMax<=yMin) return;
+  chart.setManualScale(xMin,xMax,yMin,yMax);
+}
+
+function toggleHold(key){
+  const chart=scaleCharts[key];
+  const btn=document.getElementById('hold-btn-'+key);
+  chart.setHold(!chart.held);
+  btn.classList.toggle('holding', chart.held);
+  btn.textContent = chart.held ? '▶ Retomar' : '⏸ Segurar';
+}
 
 const MNAME = ['Malha Aberta','1-DOF Pitch','2-DOF'];
 const DT_S = 1.0 / 50;
