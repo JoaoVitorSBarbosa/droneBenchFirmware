@@ -52,18 +52,19 @@ Firmware embarcado para um drone de bancada (1-DOF / 2-DOF), rodando em **ESP32-
 
 | Task | Core | Frequência | Responsabilidade |
 |------|------|------------|-----------------|
-| `taskSensor` | 0 | 50 Hz | Lê `IMU::read()` e envia dados para `ctrlQueue` e `telemQueue` |
+| `taskSensor` | 0 | 50 Hz | Lê `IMU::read()` e envia dados para `sensorQueue` |
 | `taskTelemetry` | 0 | 50 Hz | Consome `telemQueue`, imprime CSV via Serial e envia JSON via SSE ao browser |
-| `taskControl` | 1 | 100 Hz | Consome `ctrlQueue`, calcula erro e aciona motores (PID a implementar) |
+| `taskControl` | 1 | 100 Hz | Consome `sensorQueue`, calcula erro, aciona motores e envia `TelemData` para `telemQueue` |
+| `taskCalibration` | 0 | event-driven | Consome `calibCmdQueue`, executa rotinas de `Calibration` (IMU, motores, encoders, reset) |
 
-A comunicação entre tasks é exclusivamente via **FreeRTOS queues** (`ctrlQueue` com depth 5, `telemQueue` com depth 10). O `loop()` deleta a própria task — padrão correto para FreeRTOS no Arduino.
+A comunicação entre tasks é exclusivamente via **FreeRTOS queues** (`sensorQueue` depth 5, `telemQueue` depth 10, `motorCmdQueue`/`calibCmdQueue`/`ctrlParamsQueue` depth 1, overwrite). O `loop()` deleta a própria task — padrão correto para FreeRTOS no Arduino.
 
 ### Fluxo de dados
 
 ```
-IMU::read() ──► ctrlQueue ──► taskControl ──► Motor::setVelocidade()
-           └──► telemQueue ──► taskTelemetry ──► Serial CSV
-                                            └──► WebManager::sendTelemetry() ──► SSE /api/events
+IMU::read() ──► sensorQueue ──► taskControl ──► Motor::setVelocidade()
+                                      └──► telemQueue ──► taskTelemetry ──► Serial CSV
+                                                                       └──► WebManager::sendTelemetry() ──► SSE /api/events
 ```
 
 ### Classes principais
@@ -71,8 +72,7 @@ IMU::read() ──► ctrlQueue ──► taskControl ──► Motor::setVeloci
 - **`IMU`** (`include/IMU.h`): encapsula MPU-6050 via Adafruit MPU6050 (I2C) + leitura opcional de dois encoders. Produz `SensorData` com pitch (acelerômetro), yaw (integração giroscópio), e ângulos dos encoders.
 - **`Motor`** (`include/Motor.h`): abstração LEDC PWM para driver bidirecional (RPWM/LPWM). `setVelocidade(float)` aceita range `[-MOTOR_PWM_MAX_DUTY, +MOTOR_PWM_MAX_DUTY]`.
 - **`Encoder`** (`include/Encoder.h`): encoder óptico em quadratura via interrupção (`IRAM_ATTR`). 600 PPR × 4 = 2400 pulsos/volta.
-- **`WebManager`** (`include/WebManager.h`): servidor HTTP assíncrono (ESPAsyncWebServer). Expõe `attachMotors()` para controle remoto e `sendTelemetry(json)` para SSE.
-- **`Tests`** (`include/Tests.h`): rotinas de teste usando template specialization — `singleTest<T>(obj)` despacha para o método correspondente em tempo de compilação.
+- **`WebManager`** (`include/WebManager.h`): servidor HTTP assíncrono (ESPAsyncWebServer). Expõe `attachMotorQueue()`/`attachCalibQueue()`/`attachCtrlParamsQueue()` para ligar as filas do controlador e `sendTelemetry(json)`/`sendCalibStatus(json)` para SSE.
 
 ### Interface Web
 
@@ -80,11 +80,10 @@ O ESP32 sobe como **Access Point** (credenciais em `env.h`). Páginas servidas v
 
 | Rota | Arquivo | Função |
 |------|---------|--------|
-| `/` | `data/index.html` | Configuração dos ganhos PID |
-| `/test` | `data/test.html` | Teste de motor (duty cycle + SSE telemetria) |
-| `POST /api/test/motor` | — | Aciona motor: params `motor` (0=Pitch, 1=Yaw), `duty` |
+| `/` | `data/index.html` | Telemetria, configuração dos ganhos, calibração, teste de motor e rotina de malha aberta |
+| `POST /api/test/motors` | — | Aciona motores em modo teste: params `dutyPitch`, `dutyYaw` |
 | `POST /api/test/stop` | — | Para ambos os motores |
-| `GET /api/events` | — | SSE stream com JSON `{pitch, yaw, encPitch, encYaw}` |
+| `GET /api/events` | — | SSE stream com JSON de telemetria (`{pitch, yaw, encPitch, encYaw, uPitch, uYaw, ax, ay, az, mode}`) |
 
 ### PWM dos Motores
 
