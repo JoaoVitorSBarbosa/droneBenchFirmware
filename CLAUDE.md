@@ -91,15 +91,14 @@ O ESP32 sobe como **Access Point** (credenciais em `env.h`). Páginas servidas v
 - Resolução atual: 8 bits (duty 0–255). Máximo possível a 20 kHz: **11 bits** (duty 0–2047)
 - Para aumentar: alterar `MOTOR_PWM_RESOLUTION` e `MOTOR_PWM_MAX_DUTY` em `constants.h`
 
-### Ponto de integração do PID
+### Lei de controle
 
-Em `taskControl` (`src/main.cpp`), as linhas marcadas com `TODO (MCM)` são onde a equipe de Modelagem deve substituir o erro proporcional direto pela lei de controle PID/SMC:
+Implementada em `taskControl` (`src/main.cpp`), realimentação de estados com ação integral (LQI) e anti-windup por canal — não é mais um placeholder proporcional:
 
-```cpp
-float errPitch = 0.0f - last.pitch;
-// TODO (MCM): substituir por PID
-p->motorPitch->setVelocidade(errPitch);
-```
+- `DOF1`: `uPitch = Ki1·∫(rp−θ)dt − (Kx1·θ + Kx2·θ̇)`, `uYaw = −uPitch`
+- `DOF2`: acoplado pitch+yaw — `uPitch = Ki1·∫p + Ki2·∫y − (Kx1·θ + Kx2·Ω + Kx3·θ̇ + Kx4·Ω̇)`, `uYaw = Ki3·∫p + Ki4·∫y − (Kx5·θ + Kx6·Ω + Kx7·θ̇ + Kx8·Ω̇)`
+
+Os ganhos (`Ki1-4`, `Kx1-8`) são ajustáveis em runtime via `/api/params` (aba Controle da web) e persistidos com defaults em `data/parameters.json`.
 
 ### Warning conhecido
 
